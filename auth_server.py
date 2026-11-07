@@ -11,7 +11,6 @@ import os
 import re
 import secrets
 import sqlite3
-import threading
 import time
 from contextlib import contextmanager
 from http import HTTPStatus
@@ -22,7 +21,8 @@ from urllib.parse import unquote, urlsplit
 
 
 ROOT = Path(__file__).resolve().parent
-SESSION_SECONDS = 12 * 60 * 60
+SESSION_IDLE_SECONDS = 5 * 60
+SESSION_MAX_SECONDS = 30 * 24 * 60 * 60
 PASSWORD_ITERATIONS = 310_000
 MAX_REQUEST_BYTES = 16_384
 PUBLIC_PATHS = {"/login", "/logo.png"}
@@ -155,6 +155,11 @@ class AuthStore:
                 "id INTEGER PRIMARY KEY CHECK (id = 1), username TEXT NOT NULL, "
                 "salt BLOB NOT NULL, password_hash BLOB NOT NULL)"
             )
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS auth_session ("
+                "token_hash BLOB PRIMARY KEY, username TEXT NOT NULL, "
+                "idle_expires_at REAL NOT NULL, absolute_expires_at REAL NOT NULL)"
+            )
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -203,6 +208,43 @@ class AuthStore:
             password_hash, candidate_hash
         )
 
+    def create_session(self, token: str, username: str) -> None:
+        token_hash = hashlib.sha256(token.encode("ascii")).digest()
+        now = time.time()
+        with self._connect() as connection:
+            connection.execute("DELETE FROM auth_session WHERE idle_expires_at <= ?", (now,))
+            connection.execute(
+                "INSERT INTO auth_session "
+                "(token_hash, username, idle_expires_at, absolute_expires_at) VALUES (?, ?, ?, ?)",
+                (token_hash, username, now + SESSION_IDLE_SECONDS, now + SESSION_MAX_SECONDS),
+            )
+
+    def get_session_user(self, token: str) -> str | None:
+        token_hash = hashlib.sha256(token.encode("ascii")).digest()
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT username, idle_expires_at, absolute_expires_at "
+                "FROM auth_session WHERE token_hash = ?",
+                (token_hash,),
+            ).fetchone()
+            if row is None:
+                return None
+            username, idle_expires_at, absolute_expires_at = row
+            now = time.time()
+            if idle_expires_at <= now or absolute_expires_at <= now:
+                connection.execute("DELETE FROM auth_session WHERE token_hash = ?", (token_hash,))
+                return None
+            connection.execute(
+                "UPDATE auth_session SET idle_expires_at = ? WHERE token_hash = ?",
+                (min(now + SESSION_IDLE_SECONDS, absolute_expires_at), token_hash),
+            )
+            return username
+
+    def delete_session(self, token: str) -> None:
+        token_hash = hashlib.sha256(token.encode("ascii")).digest()
+        with self._connect() as connection:
+            connection.execute("DELETE FROM auth_session WHERE token_hash = ?", (token_hash,))
+
 
 class AuthHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
@@ -215,8 +257,6 @@ class AuthHTTPServer(ThreadingHTTPServer):
         self.root = root.resolve()
         self.setup_code = setup_code
         self.secure_cookie = secure_cookie
-        self.sessions: dict[str, tuple[str, float]] = {}
-        self.session_lock = threading.Lock()
 
 
 class AuthRequestHandler(BaseHTTPRequestHandler):
@@ -306,9 +346,8 @@ class AuthRequestHandler(BaseHTTPRequestHandler):
 
     def _create_session(self, username: str) -> None:
         token = secrets.token_urlsafe(32)
-        with self.server.session_lock:
-            self.server.sessions[token] = (username, time.time() + SESSION_SECONDS)
-        cookie = f"session={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={SESSION_SECONDS}"
+        self.server.store.create_session(token, username)
+        cookie = f"session={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={SESSION_MAX_SECONDS}"
         if self.server.secure_cookie:
             cookie += "; Secure"
         self._send_json(HTTPStatus.OK, {"authenticated": True, "username": username},
@@ -317,8 +356,7 @@ class AuthRequestHandler(BaseHTTPRequestHandler):
     def _logout(self) -> None:
         token = self._cookie_value("session")
         if token:
-            with self.server.session_lock:
-                self.server.sessions.pop(token, None)
+            self.server.store.delete_session(token)
         cookie = "session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0"
         if self.server.secure_cookie:
             cookie += "; Secure"
@@ -328,16 +366,7 @@ class AuthRequestHandler(BaseHTTPRequestHandler):
         token = self._cookie_value("session")
         if not token:
             return None
-        now = time.time()
-        with self.server.session_lock:
-            session = self.server.sessions.get(token)
-            if session is None:
-                return None
-            username, expiry = session
-            if expiry <= now:
-                self.server.sessions.pop(token, None)
-                return None
-            return username
+        return self.server.store.get_session_user(token)
 
     def _cookie_value(self, key: str) -> str | None:
         raw_cookie = self.headers.get("Cookie")
@@ -409,7 +438,15 @@ class AuthRequestHandler(BaseHTTPRequestHandler):
                 '@media print{#authToolbar{display:none!important}}</style>'
                 '<script>document.getElementById("authLogout").addEventListener("click",async()=>{'
                 'await fetch("/api/logout",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});'
-                'location.replace("/login")})</script>'
+                'location.replace("/login")});'
+                'let inactivityTimer,lastSessionCheck=0;'
+                'const trackActivity=()=>{clearTimeout(inactivityTimer);'
+                'inactivityTimer=setTimeout(()=>location.replace("/login"),300000);'
+                'const now=Date.now();if(now-lastSessionCheck<60000)return;lastSessionCheck=now;'
+                'fetch("/api/session",{cache:"no-store"}).then(r=>r.json()).then(s=>{'
+                'if(!s.authenticated)location.replace("/login")}).catch(()=>{});};'
+                '["pointerdown","keydown","touchstart"].forEach(e=>document.addEventListener(e,trackActivity,{passive:true}));'
+                'trackActivity()</script>'
             ).encode("utf-8")
             body_opening = re.search(rb"<body\b[^>]*>", content, re.IGNORECASE)
             if body_opening:

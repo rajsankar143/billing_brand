@@ -1,8 +1,11 @@
 import http.cookiejar
+import hashlib
 import json
+import secrets
 import sqlite3
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -46,6 +49,26 @@ class AuthenticationServerTests(unittest.TestCase):
             method="POST",
         )
         return self.opener.open(request)
+
+    def test_session_persists_after_store_reopen_and_expires(self) -> None:
+        token = secrets.token_urlsafe(32)
+        self.store.create_session(token, "billing-admin")
+
+        reopened_store = AuthStore(self.store.database_path)
+        self.assertEqual(reopened_store.get_session_user(token), "billing-admin")
+
+        expired_token = secrets.token_urlsafe(32)
+        self.store.create_session(expired_token, "billing-admin")
+        expired_hash = hashlib.sha256(expired_token.encode("ascii")).digest()
+        with self.store._connect() as connection:
+            connection.execute(
+                "UPDATE auth_session SET idle_expires_at = ? WHERE token_hash = ?",
+                (time.time() - 1, expired_hash),
+            )
+        self.assertIsNone(reopened_store.get_session_user(expired_token))
+
+        reopened_store.delete_session(token)
+        self.assertIsNone(self.store.get_session_user(token))
 
     def test_setup_login_protected_page_and_logout(self) -> None:
         with self.opener.open(self.base_url + "/") as response:
@@ -93,7 +116,8 @@ class AuthenticationServerTests(unittest.TestCase):
         with self.opener.open(self.base_url + "/wordCustomer.html") as response:
             receipt_page = response.read()
             self.assertEqual(response.status, 200)
-            self.assertIn(b"p_rateLabel", receipt_page)
+            self.assertIn(b'id="invoiceBody"', receipt_page)
+            self.assertIn(b"inactivityTimer", receipt_page)
 
         with self.post_json("/api/logout", {}) as response:
             self.assertEqual(response.status, 200)

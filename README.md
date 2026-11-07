@@ -12,7 +12,7 @@ py -3 auth_server.py
 
 Open `http://127.0.0.1:8000/`. On first startup, the terminal prints a one-time setup code. Enter it on the sign-in page to create the first admin account. Choose a password of at least 12 characters. The account is stored in `.jewellery-auth.sqlite3`; the password is stored as a salted PBKDF2 hash.
 
-After setup, sign in with that admin account. Authenticated pages include a **Sign out** control. Sessions expire after 12 hours and are cleared if the server restarts.
+After setup, sign in with that admin account. Authenticated pages include a **Sign out** control. Sessions are stored in SQLite and survive service restarts. Authenticated requests extend the five-minute idle timeout, with a 30-day maximum lifetime. Signing out revokes the current session.
 
 ## Network deployment
 
