@@ -23,6 +23,8 @@ from urllib.parse import unquote, urlsplit
 ROOT = Path(__file__).resolve().parent
 SESSION_IDLE_SECONDS = 5 * 60
 SESSION_MAX_SECONDS = 30 * 24 * 60 * 60
+LOGIN_FAILURE_WINDOW_SECONDS = 15 * 60
+LOGIN_FAILURE_LIMIT = 5
 PASSWORD_ITERATIONS = 310_000
 MAX_REQUEST_BYTES = 16_384
 PUBLIC_PATHS = {"/login", "/logo.png"}
@@ -100,6 +102,8 @@ LOGIN_PAGE = r"""<!doctype html>
     const button = document.querySelector('#submitButton');
     const message = document.querySelector('#message');
     let needsSetup = false;
+    const isLocalhost = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+    const secureLogin = location.protocol === 'https:' || isLocalhost;
 
     async function initialize() {
       const [setupResponse, sessionResponse] = await Promise.all([
@@ -121,6 +125,10 @@ LOGIN_PAGE = r"""<!doctype html>
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
       message.textContent = '';
+            if (!secureLogin) {
+                message.textContent = 'Sign-in requires HTTPS. Open the secure site URL or use the SSH tunnel at localhost.';
+                return;
+            }
       button.disabled = true;
       try {
         const body = needsSetup
@@ -129,9 +137,14 @@ LOGIN_PAGE = r"""<!doctype html>
         const response = await fetch(needsSetup ? '/api/setup' : '/api/login', {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
         });
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.error || 'Unable to sign in.');
-        location.replace('/wordCustomer.html');
+                const result = await response.json();
+                if (!response.ok) throw new Error(result.error || 'Unable to sign in.');
+                const sessionResponse = await fetch('/api/session', { cache: 'no-store' });
+                const session = await sessionResponse.json();
+                if (!session.authenticated) {
+                    throw new Error('Login succeeded but the browser did not retain the secure session. Use HTTPS or the localhost SSH tunnel.');
+                }
+                location.replace('/wordCustomer.html');
       } catch (error) {
         message.textContent = error.message || 'The server could not be reached.';
       } finally {
@@ -159,6 +172,11 @@ class AuthStore:
                 "CREATE TABLE IF NOT EXISTS auth_session ("
                 "token_hash BLOB PRIMARY KEY, username TEXT NOT NULL, "
                 "idle_expires_at REAL NOT NULL, absolute_expires_at REAL NOT NULL)"
+            )
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS login_failure ("
+                "username_key BLOB PRIMARY KEY, attempts INTEGER NOT NULL, "
+                "window_started_at REAL NOT NULL, blocked_until REAL NOT NULL)"
             )
 
     @contextmanager
@@ -192,6 +210,22 @@ class AuthStore:
             return True
         except sqlite3.IntegrityError:
             return False
+
+    def set_admin_credentials(self, username: str, password: str) -> None:
+        if self.verify_admin(username, password):
+            return
+        salt = secrets.token_bytes(16)
+        password_hash = hashlib.pbkdf2_hmac(
+            "sha256", password.encode("utf-8"), salt, PASSWORD_ITERATIONS
+        )
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO admin_user (id, username, salt, password_hash) VALUES (1, ?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET username=excluded.username, "
+                "salt=excluded.salt, password_hash=excluded.password_hash",
+                (username, salt, password_hash),
+            )
+            connection.execute("DELETE FROM auth_session")
 
     def verify_admin(self, username: str, password: str) -> bool:
         with self._connect() as connection:
@@ -244,6 +278,43 @@ class AuthStore:
         token_hash = hashlib.sha256(token.encode("ascii")).digest()
         with self._connect() as connection:
             connection.execute("DELETE FROM auth_session WHERE token_hash = ?", (token_hash,))
+
+    def login_is_blocked(self, username: str) -> bool:
+        username_key = hashlib.sha256(username.strip().casefold().encode("utf-8")).digest()
+        now = time.time()
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT blocked_until FROM login_failure WHERE username_key = ?", (username_key,)
+            ).fetchone()
+        return bool(row and row[0] > now)
+
+    def record_login_failure(self, username: str) -> None:
+        username_key = hashlib.sha256(username.strip().casefold().encode("utf-8")).digest()
+        now = time.time()
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT attempts, window_started_at FROM login_failure WHERE username_key = ?",
+                (username_key,),
+            ).fetchone()
+            if row is None or now - row[1] >= LOGIN_FAILURE_WINDOW_SECONDS:
+                attempts = 1
+                window_started_at = now
+            else:
+                attempts = row[0] + 1
+                window_started_at = row[1]
+            blocked_until = now + LOGIN_FAILURE_WINDOW_SECONDS if attempts >= LOGIN_FAILURE_LIMIT else 0
+            connection.execute(
+                "INSERT INTO login_failure (username_key, attempts, window_started_at, blocked_until) "
+                "VALUES (?, ?, ?, ?) ON CONFLICT(username_key) DO UPDATE SET "
+                "attempts=excluded.attempts, window_started_at=excluded.window_started_at, "
+                "blocked_until=excluded.blocked_until",
+                (username_key, attempts, window_started_at, blocked_until),
+            )
+
+    def clear_login_failures(self, username: str) -> None:
+        username_key = hashlib.sha256(username.strip().casefold().encode("utf-8")).digest()
+        with self._connect() as connection:
+            connection.execute("DELETE FROM login_failure WHERE username_key = ?", (username_key,))
 
 
 class AuthHTTPServer(ThreadingHTTPServer):
@@ -339,10 +410,18 @@ class AuthRequestHandler(BaseHTTPRequestHandler):
         if not isinstance(username, str) or not isinstance(password, str):
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": "Enter your username and password"})
             return
-        if not self.server.store.verify_admin(username.strip(), password):
+        username = username.strip()
+        if self.server.store.login_is_blocked(username):
+            self._send_json(HTTPStatus.TOO_MANY_REQUESTS, {
+                "error": "Too many unsuccessful attempts. Try again in 15 minutes."
+            })
+            return
+        if not self.server.store.verify_admin(username, password):
+            self.server.store.record_login_failure(username)
             self._send_json(HTTPStatus.UNAUTHORIZED, {"error": "Incorrect username or password"})
             return
-        self._create_session(username.strip())
+        self.server.store.clear_login_failures(username)
+        self._create_session(username)
 
     def _create_session(self, username: str) -> None:
         token = secrets.token_urlsafe(32)
@@ -490,6 +569,11 @@ def main() -> None:
 
     database_path = args.data_dir.resolve() / ".jewellery-auth.sqlite3"
     store = AuthStore(database_path)
+    config_path = Path(os.environ.get("AUTH_CONFIG_PATH", ROOT / "auth_config.json"))
+    credentials = load_auth_config(config_path)
+    if credentials:
+        store.set_admin_credentials(*credentials)
+
     setup_code = ""
     if not store.is_configured():
         setup_code = secrets.token_urlsafe(18)
@@ -506,6 +590,27 @@ def main() -> None:
         print("Stopping authentication server", flush=True)
     finally:
         server.server_close()
+
+
+def load_auth_config(config_path: Path) -> tuple[str, str] | None:
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, json.JSONDecodeError) as error:
+        raise SystemExit(f"Could not read {config_path.name}: {error}") from error
+    if not isinstance(config, dict):
+        raise SystemExit(f"{config_path.name} must contain a JSON object")
+
+    username = config.get("username", "")
+    password = config.get("password", "")
+    if username == "" and password == "":
+        return None
+    if not isinstance(username, str) or not 3 <= len(username.strip()) <= 64:
+        raise SystemExit(f"{config_path.name} username must be 3 to 64 characters")
+    if not isinstance(password, str) or len(password) < 12:
+        raise SystemExit(f"{config_path.name} password must be at least 12 characters")
+    return username.strip(), password
 
 
 if __name__ == "__main__":

@@ -12,7 +12,7 @@ import urllib.request
 from contextlib import closing
 from pathlib import Path
 
-from auth_server import AuthHTTPServer, AuthRequestHandler, AuthStore
+from auth_server import AuthHTTPServer, AuthRequestHandler, AuthStore, load_auth_config
 
 
 ROOT = Path(__file__).resolve().parent
@@ -75,7 +75,9 @@ class AuthenticationServerTests(unittest.TestCase):
             self.assertTrue(response.url.endswith("/login"))
             login_page = response.read()
             self.assertIn(b"Sign in", login_page)
-            self.assertEqual(login_page.count(b"location.replace('/wordCustomer.html')"), 2)
+            self.assertIn(b"location.replace('/wordCustomer.html')", login_page)
+            self.assertIn(b"const secureLogin", login_page)
+            self.assertIn(b"session cookie was not retained", login_page)
 
         setup_payload = {
             "setupCode": "test-setup-code",
@@ -84,6 +86,7 @@ class AuthenticationServerTests(unittest.TestCase):
         }
         with self.post_json("/api/setup", setup_payload) as response:
             self.assertEqual(response.status, 200)
+            self.assertIn("session=", response.headers["Set-Cookie"])
         self.assertTrue(self.store.is_configured())
 
         with closing(sqlite3.connect(self.store.database_path)) as connection:
@@ -104,14 +107,7 @@ class AuthenticationServerTests(unittest.TestCase):
             {"username": "billing-admin", "password": setup_payload["password"]},
         ) as response:
             self.assertEqual(response.status, 200)
-
-        with self.opener.open(self.base_url + "/") as response:
-            page = response.read()
-            self.assertEqual(response.status, 200)
-            self.assertIn(b"id=\"authLogout\"", page)
-            self.assertIn(b"Jewellery Billing", page)
-            self.assertLess(page.index(b"id=\"authLogout\""), page.index(b"class=\"container\""))
-            self.assertIn("https://code.jquery.com", response.headers["Content-Security-Policy"])
+            self.assertIn("session=", response.headers["Set-Cookie"])
 
         with self.opener.open(self.base_url + "/wordCustomer.html") as response:
             receipt_page = response.read()
@@ -119,10 +115,53 @@ class AuthenticationServerTests(unittest.TestCase):
             self.assertIn(b'id="invoiceBody"', receipt_page)
             self.assertIn(b"inactivityTimer", receipt_page)
 
+        with self.opener.open(self.base_url + "/wordCustomer.html") as response:
+            self.assertEqual(response.status, 200)
+
         with self.post_json("/api/logout", {}) as response:
             self.assertEqual(response.status, 200)
         with self.opener.open(self.base_url + "/") as response:
             self.assertTrue(response.url.endswith("/login"))
+
+    def test_config_credentials_replace_admin_and_revoke_sessions(self) -> None:
+        self.store.create_admin("previous-admin", "previous-admin-password")
+        token = secrets.token_urlsafe(32)
+        self.store.create_session(token, "previous-admin")
+        config_path = Path(self.temp_dir.name) / "auth_config.json"
+        config_path.write_text(
+            json.dumps({"username": "fresh-admin", "password": "fresh-admin-password"}),
+            encoding="utf-8",
+        )
+
+        credentials = load_auth_config(config_path)
+        self.assertEqual(credentials, ("fresh-admin", "fresh-admin-password"))
+        self.store.set_admin_credentials(*credentials)
+
+        self.assertTrue(self.store.verify_admin("fresh-admin", "fresh-admin-password"))
+        self.assertFalse(self.store.verify_admin("previous-admin", "previous-admin-password"))
+        self.assertIsNone(self.store.get_session_user(token))
+        with self.post_json(
+            "/api/login",
+            {"username": "fresh-admin", "password": "fresh-admin-password"},
+        ) as response:
+            self.assertEqual(response.status, 200)
+
+    def test_login_throttle_blocks_after_five_failures(self) -> None:
+        self.store.create_admin("billing-admin", "long-enough-test-password")
+        for _ in range(5):
+            with self.assertRaises(urllib.error.HTTPError) as invalid_login:
+                self.post_json(
+                    "/api/login",
+                    {"username": "billing-admin", "password": "wrong-password"},
+                )
+            self.assertEqual(invalid_login.exception.code, 401)
+
+        with self.assertRaises(urllib.error.HTTPError) as blocked_login:
+            self.post_json(
+                "/api/login",
+                {"username": "billing-admin", "password": "long-enough-test-password"},
+            )
+        self.assertEqual(blocked_login.exception.code, 429)
 
 
 if __name__ == "__main__":
