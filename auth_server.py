@@ -6,6 +6,7 @@ import hmac
 import html
 import http.cookies
 import json
+import logging
 import mimetypes
 import os
 import re
@@ -21,6 +22,7 @@ from urllib.parse import unquote, urlsplit
 
 
 ROOT = Path(__file__).resolve().parent
+LOGGER = logging.getLogger("sahu_jewellery.auth")
 SESSION_IDLE_SECONDS = 5 * 60
 SESSION_MAX_SECONDS = 30 * 24 * 60 * 60
 LOGIN_FAILURE_WINDOW_SECONDS = 15 * 60
@@ -35,6 +37,8 @@ PUBLIC_API_PATHS = {
     "/api/login",
     "/api/logout",
 }
+DEFAULT_BRAND_NAME = "Sahu Jewellery"
+DEFAULT_BRAND_ADDRESS = "Kacheri Bazar, near Gunidcha Mandir, Nilagir\nBalasore"
 ALLOWED_EXTENSIONS = {
     ".html", ".css", ".js", ".png", ".jpg", ".jpeg", ".webp", ".svg",
     ".ico", ".woff", ".woff2",
@@ -178,6 +182,10 @@ class AuthStore:
                 "username_key BLOB PRIMARY KEY, attempts INTEGER NOT NULL, "
                 "window_started_at REAL NOT NULL, blocked_until REAL NOT NULL)"
             )
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS brand_settings ("
+                "id INTEGER PRIMARY KEY CHECK (id = 1), name TEXT NOT NULL, address TEXT NOT NULL)"
+            )
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -316,6 +324,23 @@ class AuthStore:
         with self._connect() as connection:
             connection.execute("DELETE FROM login_failure WHERE username_key = ?", (username_key,))
 
+    def get_brand_settings(self) -> dict[str, str]:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT name, address FROM brand_settings WHERE id = 1"
+            ).fetchone()
+        if row is None:
+            return {"name": DEFAULT_BRAND_NAME, "address": DEFAULT_BRAND_ADDRESS}
+        return {"name": row[0], "address": row[1]}
+
+    def save_brand_settings(self, name: str, address: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO brand_settings (id, name, address) VALUES (1, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET name=excluded.name, address=excluded.address",
+                (name, address),
+            )
+
 
 class AuthHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
@@ -351,12 +376,18 @@ class AuthRequestHandler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             return
+        if path == "/api/brand-settings":
+            self._send_json(HTTPStatus.OK, self.server.store.get_brand_settings())
+            return
         self._serve_file(path)
 
     def do_POST(self) -> None:
         path = self._path()
-        if path not in PUBLIC_API_PATHS:
+        if path not in PUBLIC_API_PATHS and path != "/api/brand-settings":
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
+            return
+        if path == "/api/brand-settings" and not self._session_user():
+            self._send_json(HTTPStatus.UNAUTHORIZED, {"error": "Sign in to update showroom details"})
             return
         if not self._is_same_origin():
             self._send_json(HTTPStatus.FORBIDDEN, {"error": "Request origin rejected"})
@@ -371,8 +402,29 @@ class AuthRequestHandler(BaseHTTPRequestHandler):
             self._login(payload)
         elif path == "/api/logout":
             self._logout()
+        elif path == "/api/brand-settings":
+            self._save_brand_settings(payload)
         else:
             self._send_json(HTTPStatus.METHOD_NOT_ALLOWED, {"error": "Method not allowed"})
+
+    def _save_brand_settings(self, payload: dict[str, object]) -> None:
+        name = payload.get("name", "")
+        address = payload.get("address", "")
+        if not isinstance(name, str) or not isinstance(address, str):
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": "Showroom details must be text"})
+            return
+        name = name.strip()
+        address = address.strip()
+        if len(name) > 120 or len(address) > 500:
+            self._send_json(HTTPStatus.BAD_REQUEST, {
+                "error": "Showroom name must be at most 120 characters and address at most 500 characters"
+            })
+            return
+        self.server.store.save_brand_settings(
+            name or DEFAULT_BRAND_NAME,
+            address or DEFAULT_BRAND_ADDRESS,
+        )
+        self._send_json(HTTPStatus.OK, self.server.store.get_brand_settings())
 
     def do_HEAD(self) -> None:
         path = self._path()
@@ -384,24 +436,30 @@ class AuthRequestHandler(BaseHTTPRequestHandler):
 
     def _setup(self, payload: dict[str, object]) -> None:
         if self.server.store.is_configured():
+            LOGGER.warning("auth.setup.rejected reason=already_configured")
             self._send_json(HTTPStatus.CONFLICT, {"error": "An admin account already exists"})
             return
         setup_code = payload.get("setupCode")
         username = payload.get("username")
         password = payload.get("password")
         if not isinstance(setup_code, str) or not hmac.compare_digest(setup_code, self.server.setup_code):
+            LOGGER.warning("auth.setup.rejected reason=invalid_setup_code")
             self._send_json(HTTPStatus.FORBIDDEN, {"error": "Invalid setup code"})
             return
         if not isinstance(username, str) or not 3 <= len(username.strip()) <= 64:
+            LOGGER.warning("auth.setup.rejected reason=invalid_username")
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": "Username must be 3 to 64 characters"})
             return
         if not isinstance(password, str) or len(password) < 12:
+            LOGGER.warning("auth.setup.rejected reason=password_too_short")
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": "Password must be at least 12 characters"})
             return
         if not self.server.store.create_admin(username.strip(), password):
+            LOGGER.warning("auth.setup.rejected reason=admin_creation_conflict")
             self._send_json(HTTPStatus.CONFLICT, {"error": "An admin account already exists"})
             return
         self.server.setup_code = ""
+        LOGGER.info("auth.setup.succeeded username=%r", username.strip())
         self._create_session(username.strip())
 
     def _login(self, payload: dict[str, object]) -> None:
@@ -412,15 +470,18 @@ class AuthRequestHandler(BaseHTTPRequestHandler):
             return
         username = username.strip()
         if self.server.store.login_is_blocked(username):
+            LOGGER.warning("auth.login.throttled username=%r", username)
             self._send_json(HTTPStatus.TOO_MANY_REQUESTS, {
                 "error": "Too many unsuccessful attempts. Try again in 15 minutes."
             })
             return
         if not self.server.store.verify_admin(username, password):
             self.server.store.record_login_failure(username)
+            LOGGER.warning("auth.login.failed username=%r", username)
             self._send_json(HTTPStatus.UNAUTHORIZED, {"error": "Incorrect username or password"})
             return
         self.server.store.clear_login_failures(username)
+        LOGGER.info("auth.login.succeeded username=%r", username)
         self._create_session(username)
 
     def _create_session(self, username: str) -> None:
@@ -435,7 +496,10 @@ class AuthRequestHandler(BaseHTTPRequestHandler):
     def _logout(self) -> None:
         token = self._cookie_value("session")
         if token:
+            username = self.server.store.get_session_user(token)
             self.server.store.delete_session(token)
+            if username is not None:
+                LOGGER.info("auth.logout.succeeded username=%r", username)
         cookie = "session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0"
         if self.server.secure_cookie:
             cookie += "; Secure"
@@ -561,6 +625,10 @@ class AuthRequestHandler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     parser = argparse.ArgumentParser(description="Serve the jewellery billing pages behind login.")
     parser.add_argument("--host", default="127.0.0.1", help="Bind address (default: localhost only)")
     parser.add_argument("--port", type=int, default=8000, help="HTTP port (default: 8000)")
@@ -573,6 +641,9 @@ def main() -> None:
     credentials = load_auth_config(config_path)
     if credentials:
         store.set_admin_credentials(*credentials)
+        LOGGER.info("auth.config.loaded path=%s username=%r", config_path, credentials[0])
+    else:
+        LOGGER.info("auth.config.no_credentials path=%s; using saved admin account if configured", config_path)
 
     setup_code = ""
     if not store.is_configured():
@@ -583,7 +654,10 @@ def main() -> None:
         (args.host, args.port), AuthRequestHandler, store, ROOT, setup_code,
         secure_cookie=os.environ.get("AUTH_COOKIE_SECURE", "0") == "1",
     )
-    print(f"Serving Sahu Jewellery at http://{args.host}:{args.port}/", flush=True)
+    LOGGER.info(
+        "auth.server.started address=%s:%s database=%s secure_cookie=%s configured=%s",
+        args.host, args.port, database_path, server.secure_cookie, store.is_configured(),
+    )
     try:
         server.serve_forever()
     except KeyboardInterrupt:

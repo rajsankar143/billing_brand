@@ -20,24 +20,37 @@
   .signature span { border-bottom: 1px dotted #333; padding: 4px 48px; display: inline-block; }
   .logo { max-height: 80px; margin-bottom: 10px; }
   .branch-address { font-size: 14px; color: #555; }
+  .brand-address { white-space: pre-line; }
+  .brand-settings { max-width: 1000px; margin: 20px auto 0; }
 
+
+<details class="brand-settings no-print">
+  <summary>Showroom details</summary>
+  <form id="brandSettingsForm" class="row g-2 align-items-end mt-2">
+    <div class="col-md-4">
+      <label class="form-label small" for="brandNameInput">Showroom name</label>
+      <input id="brandNameInput" class="form-control form-control-sm" maxlength="120">
+    </div>
+    <div class="col-md-6">
+      <label class="form-label small" for="brandAddressInput">Showroom address</label>
+      <textarea id="brandAddressInput" class="form-control form-control-sm" rows="2" maxlength="500"></textarea>
+    </div>
+    <div class="col-md-2 d-grid">
+      <button class="btn btn-dark btn-sm" type="submit">Save details</button>
+    </div>
+    <div id="brandSettingsStatus" class="col-12 small" role="status" aria-live="polite"></div>
+  </form>
+</details>
   @page { size: A4; margin: 15mm; }
   @media print {
     body { background: #fff; }
     #editorLayout { display: none !important; }
     #printLayout { display: block !important; }
-    .invoice-box { box-shadow: none; border: none; margin: 0; padding: 10mm; }
+    <h2 id="brandName">💎 Sahu Jewellery</h2>
     .no-print { display: none !important; }
-  }
+    <p class="branch-address brand-address" id="headerBranchAddress">
 </style>
 </head>
-<body>
-
-<!-- EDITOR (screen) -->
-<div id="editorLayout" class="invoice-box">
-  <div class="receipt-header text-center mb-4">
-    <img src="logo.png" class="logo" alt="Gold Jewellery Logo">
-    <h2>💎 Sahu Jewellery</h2>
     <h5>ସାହୁ ଜୁଏଲେରୀ</h5>
     <p class="branch-address" id="headerBranchAddress">
       Kacheri Bazar, near Gunidcha Mandir, Nilagir<br>Balasore
@@ -171,9 +184,9 @@
 <div id="printLayout" class="invoice-box" style="display:none;">
   <div class="text-center mb-3">
     <img src="logo.png" class="logo" alt="Gold Jewellery Logo">
-    <h2 style="color:#d4af37;">💎 Sahu Jewellery</h2>
+    <h2 id="p_brandName" style="color:#d4af37;">💎 Sahu Jewellery</h2>
     <h5 style="color:#555;">ସାହୁ ଜୁଏଲେରୀ</h5>
-    <p id="p_branchAddress" class="branch-address">
+    <p id="p_branchAddress" class="branch-address brand-address">
       Kacheri Bazar, near Gunidcha Mandir, Nilagir<br>Balasore
     </p>
   </div>
@@ -221,15 +234,48 @@
 </div>
 
 <script>
-// Branch update
-document.getElementById('branchSelect').addEventListener('change', function(){
-  const val = this.value;
-  if(val === 'balasore'){
-    document.getElementById('headerBranchAddress').innerHTML = "Kacheri Bazar, near Gunidcha Mandir, Nilagir<br>Balasore";
-    document.getElementById('p_branchAddress').innerHTML = "Kacheri Bazar, near Gunidcha Mandir, Nilagir<br>Balasore";
-  } else {
-    document.getElementById('headerBranchAddress').innerHTML = "Sapthagiri Tower 1st floor, Sorahunase Road, Varthur<br>Bangalore, Karnataka,560087";
-    document.getElementById('p_branchAddress').innerHTML = "Sapthagiri Tower 1st floor, Sorahunase Road, Varthur<br>Bangalore, Karnataka,560087";
+const brandSettingsForm = document.getElementById('brandSettingsForm');
+const brandSettingsStatus = document.getElementById('brandSettingsStatus');
+
+function applyBrandSettings(settings) {
+  document.getElementById('brandName').textContent = `💎 ${settings.name}`;
+  document.getElementById('p_brandName').textContent = `💎 ${settings.name}`;
+  document.getElementById('headerBranchAddress').textContent = settings.address;
+  document.getElementById('p_branchAddress').textContent = settings.address;
+  document.getElementById('brandNameInput').value = settings.name;
+  document.getElementById('brandAddressInput').value = settings.address;
+}
+
+fetch('/api/brand-settings', { cache: 'no-store' })
+  .then(response => {
+    if (!response.ok) throw new Error('Unable to load showroom details');
+    return response.json();
+  })
+  .then(applyBrandSettings)
+  .catch(() => { brandSettingsStatus.textContent = 'Using the default Sahu Jewellery details.'; });
+
+brandSettingsForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  const saveButton = brandSettingsForm.querySelector('button[type="submit"]');
+  saveButton.disabled = true;
+  brandSettingsStatus.textContent = '';
+  try {
+    const response = await fetch('/api/brand-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: document.getElementById('brandNameInput').value,
+        address: document.getElementById('brandAddressInput').value
+      })
+    });
+    const settings = await response.json();
+    if (!response.ok) throw new Error(settings.error || 'Unable to save showroom details');
+    applyBrandSettings(settings);
+    brandSettingsStatus.textContent = 'Showroom details saved.';
+  } catch (error) {
+    brandSettingsStatus.textContent = error.message || 'Unable to save showroom details.';
+  } finally {
+    saveButton.disabled = false;
   }
 });
 

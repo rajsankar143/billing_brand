@@ -12,7 +12,14 @@ import urllib.request
 from contextlib import closing
 from pathlib import Path
 
-from auth_server import AuthHTTPServer, AuthRequestHandler, AuthStore, load_auth_config
+from auth_server import (
+    DEFAULT_BRAND_ADDRESS,
+    DEFAULT_BRAND_NAME,
+    AuthHTTPServer,
+    AuthRequestHandler,
+    AuthStore,
+    load_auth_config,
+)
 
 
 ROOT = Path(__file__).resolve().parent
@@ -69,6 +76,59 @@ class AuthenticationServerTests(unittest.TestCase):
 
         reopened_store.delete_session(token)
         self.assertIsNone(self.store.get_session_user(token))
+
+    def test_optional_brand_settings_default_and_persist(self) -> None:
+        self.store.create_admin("billing-admin", "long-enough-test-password")
+        with self.post_json(
+            "/api/login",
+            {"username": "billing-admin", "password": "long-enough-test-password"},
+        ):
+            pass
+
+        with self.opener.open(self.base_url + "/api/brand-settings") as response:
+            self.assertEqual(json.load(response), {
+                "name": DEFAULT_BRAND_NAME,
+                "address": DEFAULT_BRAND_ADDRESS,
+            })
+
+        with self.post_json(
+            "/api/brand-settings",
+            {"name": "Gem House", "address": "12 Main Road"},
+        ) as response:
+            self.assertEqual(json.load(response), {
+                "name": "Gem House",
+                "address": "12 Main Road",
+            })
+
+        with self.post_json("/api/brand-settings", {"name": "", "address": ""}) as response:
+            self.assertEqual(json.load(response), {
+                "name": DEFAULT_BRAND_NAME,
+                "address": DEFAULT_BRAND_ADDRESS,
+            })
+
+    def test_login_events_are_logged_without_passwords(self) -> None:
+        username = "billing-admin"
+        password = "long-enough-test-password"
+        rejected_password = "incorrect-password"
+        self.store.create_admin(username, password)
+
+        with self.assertLogs("sahu_jewellery.auth", level="INFO") as captured:
+            with self.assertRaises(urllib.error.HTTPError):
+                self.post_json(
+                    "/api/login",
+                    {"username": username, "password": rejected_password},
+                )
+            with self.post_json(
+                "/api/login",
+                {"username": username, "password": password},
+            ) as response:
+                self.assertEqual(response.status, 200)
+
+        output = "\n".join(captured.output)
+        self.assertIn("auth.login.failed", output)
+        self.assertIn("auth.login.succeeded", output)
+        self.assertNotIn(password, output)
+        self.assertNotIn(rejected_password, output)
 
     def test_setup_login_protected_page_and_logout(self) -> None:
         with self.opener.open(self.base_url + "/") as response:
