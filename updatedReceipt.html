@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -249,3 +250,256 @@ updateTotals();
 
 </body>
 </html>
+=======
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Sahu Jewellery - Receipt</title>
+
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+
+<style>
+body { background-color: #f8f9fa; }
+.invoice-box { background:#fff; padding:25px; border-radius:12px; box-shadow:0 0 12px rgba(0,0,0,0.08); max-width:1000px; margin:20px auto; }
+.receipt-header h2 { font-weight:700; color:#d4af37; }
+.table th { background:#f1f1f1; }
+.grand-total { background:#fff3cd; font-weight:700; padding:.45rem; border-radius:6px; }
+.signature { margin-top:40px; text-align:right; }
+.logo { max-height:80px; margin-bottom:10px; }
+
+@media print {
+  body { background:#fff; }
+  #editorLayout { display:none !important; }
+  #printLayout { display:block !important; }
+  .invoice-box { box-shadow:none; margin:0; padding:10mm; }
+  .no-print { display:none !important; }
+}
+</style>
+</head>
+<body>
+
+<!-- ================= SCREEN EDITOR ================= -->
+<div id="editorLayout" class="invoice-box">
+
+<div class="text-center mb-4">
+  <img src="logo.png" class="logo">
+  <h2>💎 Sahu Jewellery</h2>
+  <h5>ସାହୁ ଜୁଏଲେରୀ</h5>
+  <p>Kacheri Bazar, Nilagir, Balasore</p>
+</div>
+
+<div class="row mb-3">
+  <div class="col-md-4">
+    <label class="form-label small">Gold Rate (₹/g)</label>
+    <input id="globalRate" type="number" class="form-control form-control-sm" value="0">
+  </div>
+  <div class="col-md-4">
+    <label class="form-label small">GST %</label>
+    <input id="globalGST" type="number" class="form-control form-control-sm" value="3">
+  </div>
+  <div class="col-md-4">
+    <label class="form-label small">Paid Amount</label>
+    <input id="paidAmountInput" type="number" class="form-control form-control-sm" value="0">
+  </div>
+</div>
+
+<div class="table-responsive">
+<table class="table table-bordered text-center align-middle" id="invoiceTable">
+<thead>
+<tr>
+<th>Description</th>
+<th>Quality</th>
+<th>Qty</th>
+<th>Weight (g)</th>
+<th>Gross (₹)</th>
+<th>Making (₹/g)</th>
+<th>Total (₹)</th>
+<th class="no-print"></th>
+</tr>
+</thead>
+<tbody id="invoiceBody">
+<tr>
+<td><input class="form-control form-control-sm desc" value="Gold Ring"></td>
+<td>
+<select class="form-select form-select-sm quality">
+<option>18 CT</option>
+<option selected>22 CT 916 HM</option>
+<option>24 CT HM</option>
+</select>
+</td>
+<td><input type="number" class="form-control form-control-sm qty" value="1"></td>
+<td><input type="number" class="form-control form-control-sm weight" value="5"></td>
+<td class="gross">0.00</td>
+<td><input type="number" class="form-control form-control-sm making" value="500"></td>
+<td class="total">0.00</td>
+<td class="no-print"><button class="btn btn-danger btn-sm" onclick="removeRow(this)">×</button></td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<div class="text-end mt-3">
+<p><strong>Subtotal:</strong> ₹ <span id="screen_subtotal">0.00</span></p>
+<p><strong>GST:</strong> ₹ <span id="screen_gst">0.00</span></p>
+<p class="grand-total"><strong>Grand Total:</strong> ₹ <span id="screen_grandTotal">0.00</span></p>
+<p><strong>Amount Due:</strong> ₹ <span id="screen_due">0.00</span></p>
+</div>
+
+<div class="d-flex justify-content-between mt-3">
+<button class="btn btn-outline-primary btn-sm" onclick="addRow()">+ Add Item</button>
+<button class="btn btn-primary btn-sm" onclick="validateAndPrint()">Print</button>
+</div>
+
+</div>
+
+<!-- ================= PRINT LAYOUT ================= -->
+<div id="printLayout" class="invoice-box" style="display:none;">
+
+<h2 class="text-center" style="color:#d4af37;">💎 Sahu Jewellery</h2>
+
+<table class="table table-bordered text-center mt-3">
+<thead>
+<tr>
+<th>Description</th>
+<th>Quality</th>
+<th>Qty</th>
+<th>Weight</th>
+<th>Gross</th>
+<th>Making</th>
+<th>Total</th>
+</tr>
+</thead>
+<tbody id="p_invoiceBody"></tbody>
+</table>
+
+<div class="text-end">
+<p><strong>Subtotal:</strong> ₹ <span id="p_subtotal"></span></p>
+<p><strong>GST:</strong> ₹ <span id="p_gst"></span></p>
+<p><strong>Grand Total:</strong> ₹ <span id="p_grandTotal"></span></p>
+<p><strong>Paid:</strong> ₹ <span id="p_paid"></span></p>
+<p><strong>Due:</strong> ₹ <span id="p_due"></span></p>
+</div>
+
+</div>
+
+<script>
+
+function addRow(){
+const row=document.createElement("tr");
+row.innerHTML=`
+<td><input class="form-control form-control-sm desc"></td>
+<td>
+<select class="form-select form-select-sm quality">
+<option>18 CT</option>
+<option>22 CT 916 HM</option>
+<option>24 CT HM</option>
+</select>
+</td>
+<td><input type="number" class="form-control form-control-sm qty" value="1"></td>
+<td><input type="number" class="form-control form-control-sm weight" value="1"></td>
+<td class="gross">0.00</td>
+<td><input type="number" class="form-control form-control-sm making" value="0"></td>
+<td class="total">0.00</td>
+<td class="no-print"><button class="btn btn-danger btn-sm" onclick="removeRow(this)">×</button></td>`;
+document.getElementById("invoiceBody").appendChild(row);
+addListeners();
+}
+
+function removeRow(btn){
+btn.closest("tr").remove();
+updateTotals();
+}
+
+function addListeners(){
+document.querySelectorAll('#invoiceBody input, #globalRate, #globalGST, #paidAmountInput')
+.forEach(el=> el.oninput=updateTotals);
+}
+addListeners();
+
+function updateTotals(){
+
+const rate=parseFloat(globalRate.value)||0;
+const gstPercent=parseFloat(globalGST.value)||0;
+let subtotal=0;
+
+document.querySelectorAll("#invoiceBody tr").forEach(row=>{
+
+const qty=parseFloat(row.querySelector(".qty").value)||0;
+const wt=parseFloat(row.querySelector(".weight").value)||0;
+const makingPerGram=parseFloat(row.querySelector(".making").value)||0;
+
+const gross=wt*rate;
+const makingTotal=wt*makingPerGram;
+const total=gross+makingTotal;
+
+row.querySelector(".gross").textContent=gross.toFixed(2);
+row.querySelector(".total").textContent=total.toFixed(2);
+
+subtotal+=total;
+});
+
+const gst=subtotal*gstPercent/100;
+const grandTotal=subtotal+gst;
+
+const paid=parseFloat(paidAmountInput.value)||0;
+const due=grandTotal-paid;
+
+screen_subtotal.textContent=subtotal.toFixed(2);
+screen_gst.textContent=gst.toFixed(2);
+screen_grandTotal.textContent=grandTotal.toFixed(2);
+screen_due.textContent=due.toFixed(2);
+
+updatePrint(subtotal,gst,grandTotal,paid,due);
+}
+
+function updatePrint(subtotal,gst,grandTotal,paid,due){
+
+const pBody=document.getElementById("p_invoiceBody");
+pBody.innerHTML="";
+
+document.querySelectorAll("#invoiceBody tr").forEach(row=>{
+const desc=row.querySelector(".desc").value;
+const quality=row.querySelector(".quality").value;
+const qty=row.querySelector(".qty").value;
+const wt=row.querySelector(".weight").value;
+const gross=row.querySelector(".gross").textContent;
+const making=row.querySelector(".making").value;
+const total=row.querySelector(".total").textContent;
+
+pBody.innerHTML+=`
+<tr>
+<td>${desc}</td>
+<td>${quality}</td>
+<td>${qty}</td>
+<td>${wt}</td>
+<td>${gross}</td>
+<td>${making}/g</td>
+<td>${total}</td>
+</tr>`;
+});
+
+p_subtotal.textContent=subtotal.toFixed(2);
+p_gst.textContent=gst.toFixed(2);
+p_grandTotal.textContent=grandTotal.toFixed(2);
+p_paid.textContent=paid.toFixed(2);
+p_due.textContent=due.toFixed(2);
+}
+
+function validateAndPrint(){
+if(parseFloat(globalRate.value)<=0){
+alert("Gold rate must be greater than 0");
+return;
+}
+updateTotals();
+window.print();
+}
+
+updateTotals();
+
+</script>
+
+</body>
+</html>
+>>>>>>> a4c3ca1bbf4f08ed566c9a0f2014bfaecf911a55
