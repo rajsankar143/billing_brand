@@ -1,0 +1,22 @@
+[Unit]
+Description=Sahu Jewellery Billing Server
+After=network.target
+
+[Service]
+Type=simple
+User=billing
+Group=billing
+WorkingDirectory=/opt/billing_brand
+Environment=AUTH_COOKIE_SECURE=1
+Environment=AUTH_CONFIG_PATH=/etc/sahu-jewellery/auth_config.json
+ExecStart=/usr/bin/python3 /opt/billing_brand/auth_server.py --host 127.0.0.1 --port 8000 --data-dir /var/lib/sahu-jewellery
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/sahu-jewellery
+
+[Install]
+WantedBy=multi-user.target

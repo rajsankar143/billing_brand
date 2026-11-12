@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Sahu Jewellery - Receipt</title>
+
+<!-- Bootstrap 5 -->
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" media="all">
+
+<style>
+  body { background-color: #f8f9fa; }
+  .invoice-box { background: #fff; padding: 25px; border-radius: 12px; box-shadow: 0 0 12px rgba(0,0,0,0.08); max-width: 1000px; margin: 20px auto; }
+  .receipt-header h2 { font-weight: 700; color: #d4af37; margin-bottom: 0; }
+  .receipt-header h5 { color: #555; margin-top: 0.25rem; }
+  .table th { background: #f1f1f1; color: #333; }
+  .table-bordered td, .table-bordered th { border: 1px solid #e1e1e1 !important; }
+  .grand-total { background: #fff3cd; font-weight: 700; padding: .45rem; border-radius:6px; }
+  .signature { margin-top: 40px; text-align: right; font-size: 14px; }
+  .signature span { border-bottom: 1px dotted #333; padding: 4px 48px; display: inline-block; }
+  .logo { max-height: 80px; margin-bottom: 10px; }
+  .branch-address { font-size: 14px; color: #555; }
+  .brand-address { white-space: pre-line; }
+  .brand-settings { max-width: 1000px; margin: 20px auto 0; }
+
+
+<details class="brand-settings no-print">
+  <summary>Showroom details</summary>
+  <form id="brandSettingsForm" class="row g-2 align-items-end mt-2">
+    <div class="col-md-4">
+      <label class="form-label small" for="brandNameInput">Showroom name</label>
+      <input id="brandNameInput" class="form-control form-control-sm" maxlength="120">
+    </div>
+    <div class="col-md-6">
+      <label class="form-label small" for="brandAddressInput">Showroom address</label>
+      <textarea id="brandAddressInput" class="form-control form-control-sm" rows="2" maxlength="500"></textarea>
+    </div>
+    <div class="col-md-2 d-grid">
+      <button class="btn btn-dark btn-sm" type="submit">Save details</button>
+    </div>
+    <div id="brandSettingsStatus" class="col-12 small" role="status" aria-live="polite"></div>
+  </form>
+</details>
+  @page { size: A4; margin: 15mm; }
+  @media print {
+    body { background: #fff; }
+    #editorLayout { display: none !important; }
+    #printLayout { display: block !important; }
+    <h2 id="brandName">💎 Sahu Jewellery</h2>
+    .no-print { display: none !important; }
+    <p class="branch-address brand-address" id="headerBranchAddress">
+</style>
+</head>
+    <h5>ସାହୁ ଜୁଏଲେରୀ</h5>
+    <p class="branch-address" id="headerBranchAddress">
+      Kacheri Bazar, near Gunidcha Mandir, Nilagir<br>Balasore
+    </p>
+    <div class="no-print mt-2">
+      <label class="form-label small">Select Branch:</label>
+      <select id="branchSelect" class="form-select form-select-sm w-auto mx-auto">
+        <option value="balasore" selected>Nilagir - Balasore</option>
+        <option value="bangalore">Bangalore - Varthur</option>
+      </select>
+    </div>
+    <p class="text-muted small">Fill details below — totals auto-update</p>
+  </div>
+
+  <!-- Shop + Customer -->
+  <div class="row g-2 mb-3">
+    <div class="col-md-4">
+      <label class="form-label small">Shop Owner / Prop</label>
+      <input id="shopOwner" class="form-control form-control-sm" value="Rupali Sahu">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label small">Receipt No</label>
+      <input id="receiptNo" class="form-control form-control-sm" value="11041">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label small">Date</label>
+      <input id="receiptDate" type="date" class="form-control form-control-sm">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label small">GST No</label>
+      <input id="gstNo" class="form-control form-control-sm" value="21GVTPS7057F1Z0">
+    </div>
+  </div>
+
+  <div class="row g-2 mb-3">
+    <div class="col-md-6">
+      <label class="form-label small">Customer Name</label>
+      <input id="customerName" class="form-control form-control-sm" placeholder="Customer name">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label small">Phone</label>
+      <input id="customerPhone" class="form-control form-control-sm">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label small">Email</label>
+      <input id="customerEmail" type="email" class="form-control form-control-sm">
+    </div>
+  </div>
+
+  <div class="mb-3">
+    <label class="form-label small">Customer Address</label>
+    <textarea id="customerAddress" class="form-control form-control-sm" rows="2"></textarea>
+  </div>
+
+  <div class="row g-2 mb-3">
+    <div class="col-md-3">
+      <label class="form-label small" for="rateType">Rate Type</label>
+      <select id="rateType" class="form-select form-select-sm">
+        <option value="Gold" selected>Gold</option>
+        <option value="Silver">Silver</option>
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label small" for="globalRate">Rate (₹/g)</label>
+      <input id="globalRate" type="number" class="form-control form-control-sm" value="0">
+    </div>
+    <div class="col-md-6">
+      <label class="form-label small">GST %</label>
+      <input id="globalGST" type="number" class="form-control form-control-sm" value="3">
+    </div>
+  </div>
+
+  <!-- Table -->
+  <div class="table-responsive">
+    <table class="table table-bordered table-sm text-center align-middle" id="invoiceTable">
+      <thead class="table-light">
+        <tr>
+          <th>Description</th><th>Quality</th><th>Qty</th><th>Weight (g)</th>
+          <th>Gross (₹)</th><th>Making Charge (₹/item)</th><th>Total (₹)</th><th class="no-print"></th>
+        </tr>
+      </thead>
+      <tbody id="invoiceBody">
+        <tr>
+          <td><input class="form-control form-control-sm desc" value="Gold Ring"></td>
+          <td>
+            <select class="form-select form-select-sm quality">
+              <option>18 CT</option>
+              <option selected>22 CT 916 HM</option>
+              <option>24 CT HM</option>
+              <option>Silver</option>
+            </select>
+          </td>
+          <td><input class="form-control form-control-sm qty" type="number" value="1"></td>
+          <td><input class="form-control form-control-sm weight" type="number" value="5"></td>
+          <td class="gross">0.00</td>
+          <td><input class="form-control form-control-sm making" type="number" value="1000"></td>
+          <td class="total">0.00</td>
+          <td class="no-print"><button class="btn btn-sm btn-danger" onclick="removeRow(this)">×</button></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Totals -->
+  <div class="text-end mb-3">
+    <p><strong>Subtotal:</strong> ₹ <span id="screen_subtotal">0.00</span></p>
+    <p><strong>GST:</strong> ₹ <span id="screen_gst">0.00</span></p>
+    <p class="grand-total"><strong>Total (with GST):</strong> ₹ <span id="screen_grandTotal">0.00</span></p>
+  </div>
+
+  <!-- NEW Paid Amount Input -->
+  <div class="row g-2 mb-3">
+    <div class="col-md-4">
+      <label class="form-label small">Paid Amount (₹)</label>
+      <input id="paidAmountInput" type="number" class="form-control form-control-sm" value="0">
+    </div>
+  </div>
+
+  <!-- Actions -->
+  <div class="d-flex justify-content-between mb-3">
+    <div>
+      <button class="btn btn-outline-primary btn-sm" onclick="addRow()">+ Add Item</button>
+    </div>
+    <div>
+      <button class="btn btn-primary btn-sm" onclick="validateAndPrint()">🖨 Print / Save PDF</button>
+    </div>
+  </div>
+</div>
+
+<!-- PRINT LAYOUT -->
+<div id="printLayout" class="invoice-box" style="display:none;">
+  <div class="text-center mb-3">
+    <img src="logo.png" class="logo" alt="Gold Jewellery Logo">
+    <h2 id="p_brandName" style="color:#d4af37;">💎 Sahu Jewellery</h2>
+    <h5 style="color:#555;">ସାହୁ ଜୁଏଲେରୀ</h5>
+    <p id="p_branchAddress" class="branch-address brand-address">
+      Kacheri Bazar, near Gunidcha Mandir, Nilagir<br>Balasore
+    </p>
+  </div>
+
+  <div class="row mb-2">
+    <div class="col-6"><strong>Shop Owner:</strong> <span id="p_shopOwner"></span></div>
+    <div class="col-3"><strong>Receipt No:</strong> <span id="p_receiptNo"></span></div>
+    <div class="col-3"><strong>Date:</strong> <span id="p_receiptDate"></span></div>
+  </div>
+  <div class="mb-2"><strong>GST No:</strong> <span id="p_gstNo"></span></div>
+
+  <div class="mb-1"><strong>Customer:</strong> <span id="p_customerName"></span></div>
+  <div class="mb-1"><strong>Phone:</strong> <span id="p_customerPhone"></span> | 
+    <strong>Email:</strong> <span id="p_customerEmail"></span></div>
+  <div class="mb-2"><strong>Address:</strong> <span id="p_customerAddress"></span></div>
+
+  <div class="mb-2"><strong>Gold Rate:</strong> ₹ <span id="p_goldRate"></span> | 
+    <strong>Silver Rate:</strong> ₹ <span id="p_silverRate"></span> | 
+    <strong>GST %:</strong> <span id="p_gstPercent"></span></div>
+
+  <div class="table-responsive">
+    <table class="table table-bordered table-sm text-center">
+      <thead>
+        <tr style="background:#f1f1f1;">
+          <th>Description</th><th>Quality</th><th>Qty</th><th>Weight (g)</th>
+          <th>Gross (₹)</th><th>Making Charge (₹/item)</th><th>Total (₹)</th>
+        </tr>
+      </thead>
+      <tbody id="p_invoiceBody"></tbody>
+    </table>
+  </div>
+
+  <div class="text-end mt-3">
+    <p><strong>Subtotal:</strong> ₹ <span id="p_subtotal"></span></p>
+    <p><strong>GST:</strong> ₹ <span id="p_totalGST"></span></p>
+    <p class="grand-total"><strong>Grand Total:</strong> ₹ <span id="p_grandTotal"></span></p>
+    <p><strong>In Words:</strong> <span id="p_grandTotalWords"></span></p>
+
+    <!-- NEW -->
+    <p><strong>Paid Amount:</strong> ₹ <span id="p_paidAmount"></span></p>
+    <p><strong>Amount Due:</strong> ₹ <span id="p_amountDue"></span></p>
+  </div>
+
+  <div class="signature"><span> Seal & Signature</span></div>
+</div>
+
+<script>
+const brandSettingsForm = document.getElementById('brandSettingsForm');
+const brandSettingsStatus = document.getElementById('brandSettingsStatus');
+
+function applyBrandSettings(settings) {
+  document.getElementById('brandName').textContent = `💎 ${settings.name}`;
+  document.getElementById('p_brandName').textContent = `💎 ${settings.name}`;
+  document.getElementById('headerBranchAddress').textContent = settings.address;
+  document.getElementById('p_branchAddress').textContent = settings.address;
+  document.getElementById('brandNameInput').value = settings.name;
+  document.getElementById('brandAddressInput').value = settings.address;
+}
+
+fetch('/api/brand-settings', { cache: 'no-store' })
+  .then(response => {
+    if (!response.ok) throw new Error('Unable to load showroom details');
+    return response.json();
+  })
+  .then(applyBrandSettings)
+  .catch(() => { brandSettingsStatus.textContent = 'Using the default Sahu Jewellery details.'; });
+
+brandSettingsForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  const saveButton = brandSettingsForm.querySelector('button[type="submit"]');
+  saveButton.disabled = true;
+  brandSettingsStatus.textContent = '';
+  try {
+    const response = await fetch('/api/brand-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: document.getElementById('brandNameInput').value,
+        address: document.getElementById('brandAddressInput').value
+      })
+    });
+    const settings = await response.json();
+    if (!response.ok) throw new Error(settings.error || 'Unable to save showroom details');
+    applyBrandSettings(settings);
+    brandSettingsStatus.textContent = 'Showroom details saved.';
+  } catch (error) {
+    brandSettingsStatus.textContent = error.message || 'Unable to save showroom details.';
+  } finally {
+    saveButton.disabled = false;
+  }
+});
+
+// Dynamic row add/remove
+function addRow(){
+  const row=document.createElement("tr");
+  row.innerHTML=`
+  <td><input class="form-control form-control-sm desc"></td>
+  <td><select class="form-select form-select-sm quality">
+      <option>18 CT</option>
+      <option>22 CT 916 HM</option>
+      <option>24 CT HM</option>
+        <option>Silver</option>
+  </select></td>
+  <td><input class="form-control form-control-sm qty" type="number" value="1"></td>
+  <td><input class="form-control form-control-sm weight" type="number" value="1"></td>
+  <td class="gross">0.00</td>
+  <td><input class="form-control form-control-sm making" type="number" value="0"></td>
+  <td class="total">0.00</td>
+  <td class="no-print"><button class="btn btn-sm btn-danger" onclick="removeRow(this)">×</button></td>`;
+  
+  document.getElementById("invoiceBody").appendChild(row);
+  addListeners();
+}
+function removeRow(btn){ btn.closest("tr").remove(); updateTotals(); }
+
+// Auto-update totals
+function addListeners(){
+  document.querySelectorAll('#invoiceBody input, #invoiceBody select, #globalRate, #globalGST').forEach(el=>{
+    el.oninput = updateTotals;
+  });
+
+  // NEW
+  document.getElementById("paidAmountInput").oninput = updateTotals;
+}
+addListeners();
+
+// TOTAL UPDATE FUNCTION (NEW)
+const rates = { Gold: 0, Silver: 0 };
+let activeRateType = document.getElementById("rateType").value;
+
+document.getElementById("rateType").addEventListener("change", function(){
+  rates[activeRateType] = parseFloat(document.getElementById("globalRate").value) || 0;
+  activeRateType = this.value;
+  document.getElementById("globalRate").value = rates[activeRateType] || 0;
+  updateTotals();
+});
+
+function updateTotals(){
+  rates[activeRateType] = parseFloat(document.getElementById('globalRate').value) || 0;
+  const gstPercent = parseFloat(document.getElementById('globalGST').value) || 0;
+  let subtotal = 0;
+
+  document.querySelectorAll("#invoiceBody tr").forEach(row => {
+    const qty = parseFloat(row.querySelector(".qty").value) || 0;
+    const wt = parseFloat(row.querySelector(".weight").value) || 0;
+    const making = parseFloat(row.querySelector(".making").value) || 0;
+    const quality = row.querySelector(".quality").value;
+    const rate = rates[quality === "Silver" ? "Silver" : "Gold"];
+
+    const gross = wt * rate * qty;
+    const total = gross + making * qty;
+
+    row.querySelector(".gross").textContent = gross.toFixed(2);
+    row.querySelector(".total").textContent = total.toFixed(2);
+
+    subtotal += total;
+  });
+
+  const gstAmt = subtotal * gstPercent / 100;
+  const grandTotal = subtotal + gstAmt;
+
+  // NEW — Paid Amount
+  const paidAmount = parseFloat(document.getElementById("paidAmountInput").value) || 0;
+  const amountDue = grandTotal - paidAmount;
+
+  // Print layout update
+  document.getElementById('p_shopOwner').textContent=document.getElementById('shopOwner').value;
+  document.getElementById('p_receiptNo').textContent=document.getElementById('receiptNo').value;
+  document.getElementById('p_receiptDate').textContent=document.getElementById('receiptDate').value;
+  document.getElementById('p_gstNo').textContent=document.getElementById('gstNo').value;
+
+  document.getElementById('p_customerName').textContent=document.getElementById('customerName').value;
+  document.getElementById('p_customerPhone').textContent=document.getElementById('customerPhone').value;
+  document.getElementById('p_customerEmail').textContent=document.getElementById('customerEmail').value;
+  document.getElementById('p_customerAddress').textContent=document.getElementById('customerAddress').value;
+
+  document.getElementById('p_goldRate').textContent=rates.Gold.toFixed(2);
+  document.getElementById('p_silverRate').textContent=rates.Silver.toFixed(2);
+  document.getElementById('p_gstPercent').textContent=gstPercent+"%";
+
+  document.getElementById('p_subtotal').textContent=subtotal.toFixed(2);
+  document.getElementById('p_totalGST').textContent=gstAmt.toFixed(2);
+  document.getElementById('p_grandTotal').textContent=grandTotal.toFixed(2);
+
+  document.getElementById('p_grandTotalWords').textContent=numberToWords(Math.round(grandTotal));
+
+  // NEW — Print paid & due
+  document.getElementById('p_paidAmount').textContent = paidAmount.toFixed(2);
+  document.getElementById('p_amountDue').textContent = amountDue.toFixed(2);
+
+  // Screen
+  document.getElementById('screen_subtotal').textContent=subtotal.toFixed(2);
+  document.getElementById('screen_gst').textContent=gstAmt.toFixed(2);
+  document.getElementById('screen_grandTotal').textContent=grandTotal.toFixed(2);
+
+  // Print table
+  const pBody=document.getElementById("p_invoiceBody");
+  pBody.innerHTML="";
+  document.querySelectorAll("#invoiceBody tr").forEach(row=>{
+    const desc=row.querySelector(".desc").value;
+    const quality=row.querySelector(".quality").value;
+    const qty=row.querySelector(".qty").value;
+    const wt=row.querySelector(".weight").value;
+    const gross=row.querySelector(".gross").textContent;
+    const making=row.querySelector(".making").value;
+    const total=row.querySelector(".total").textContent;
+
+    pBody.innerHTML+=`<tr>
+      <td>${desc}</td><td>${quality}</td><td>${qty}</td><td>${wt}</td>
+      <td>${gross}</td><td>${making}</td><td>${total}</td>
+    </tr>`;
+  });
+}
+
+// Print validation
+function validateAndPrint(){
+  rates[activeRateType] = parseFloat(document.getElementById('globalRate').value) || 0;
+  const hasInvalidRate = Array.from(document.querySelectorAll("#invoiceBody tr")).some(row => {
+    const rateType = row.querySelector(".quality").value === "Silver" ? "Silver" : "Gold";
+    return rates[rateType] <= 0;
+  });
+  if(hasInvalidRate){ alert("Enter a rate greater than 0 for each item type"); return; }
+  updateTotals();
+  window.print();
+}
+
+// Number to words
+function numberToWords(num) {
+  const ones = ["","One","Two","Three","Four","Five","Six","Seven","Eight","Nine","Ten",
+  "Eleven","Twelve","Thirteen","Fourteen","Fifteen","Sixteen","Seventeen","Eighteen","Nineteen"];
+
+  const tens = ["","", "Twenty","Thirty","Forty","Fifty","Sixty","Seventy","Eighty","Ninety"];
+
+  function convertToWords(n) {
+    if (n === 0) return "";
+    if (n < 20) return ones[n];
+    if (n < 100)
+      return tens[Math.floor(n/10)] + (n%10 ? " " + ones[n%10] : "");
+    if (n < 1000)
+      return ones[Math.floor(n/100)] + " Hundred" + (n%100 ? " " + convertToWords(n%100) : "");
+    if (n < 100000)
+      return convertToWords(Math.floor(n/1000)) + " Thousand" + (n%1000 ? " " + convertToWords(n%1000) : "");
+    if (n < 10000000)
+      return convertToWords(Math.floor(n/100000)) + " Lakh" + (n%100000 ? " " + convertToWords(n%100000) : "");
+    return convertToWords(Math.floor(n/10000000)) + " Crore" + (n%10000000 ? " " + convertToWords(n%10000000) : "");
+  }
+
+  if (num === 0) return "Rupees Zero Only";
+
+  let parts = Number(num).toFixed(2).split(".");
+  let rupees = parseInt(parts[0], 10);
+  let paise = parseInt(parts[1], 10);
+
+  let result = "Rupees ";
+
+  if (rupees > 0) {
+    result += convertToWords(rupees);
+  } else {
+    result += "Zero";
+  }
+
+  if (paise > 0) {
+    result += " and " + convertToWords(paise) + " Paise";
+  }
+
+  result += " Only";
+
+  return result.trim();
+}
+
+</script>
+
+</body>
+</html>

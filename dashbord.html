@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Jewellery Receipt Generator</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    @media print {
+      body * {
+        visibility: hidden;
+      }
+      #printable, #printable * {
+        visibility: visible;
+      }
+      #printable {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        padding: 30px;
+        background-color: #fff;
+        color: #000;
+        font-family: 'Arial', sans-serif;
+      }
+    }
+
+    .receipt-box {
+      border: 2px solid #d4af37;
+      padding: 25px;
+      border-radius: 15px;
+      background: #fffdf5;
+      box-shadow: 0 0 10px rgba(212, 175, 55, 0.3);
+    }
+
+    .gold-image {
+      max-width: 100px;
+      margin-bottom: 15px;
+      display: block;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .carousel img {
+      max-height: 300px;
+      object-fit: cover;
+    }
+  </style>
+</head>
+<body class="bg-light">
+
+  <!-- Bootstrap Header -->
+  <nav class="navbar navbar-expand-lg navbar-dark bg-warning mb-4">
+    <div class="container-fluid">
+      <a class="navbar-brand fw-bold text-dark" href="#">💎 Golden Touch Jewellers</a>
+    </div>
+  </nav>
+
+  <!-- Carousel -->
+  <div id="goldCarousel" class="carousel slide mb-4" data-bs-ride="carousel">
+    <div class="carousel-inner">
+      <div class="carousel-item active">
+        <img src="gold1.jpg" class="d-block w-100" alt="Gold Jewellery 1">
+      </div>
+      <div class="carousel-item">
+        <img src="gold2.jpg" class="d-block w-100" alt="Gold Jewellery 2">
+      </div>
+      <div class="carousel-item">
+        <img src="gold3.jpg" class="d-block w-100" alt="Gold Jewellery 3">
+      </div>
+    </div>
+  </div>
+    <!-- Form Starts -->
+    <form id="receiptForm" class="bg-white p-4 rounded shadow-sm">
+      <div class="row mb-3">
+        <div class="col-md-6">
+          <label for="billDate" class="form-label">Date</label>
+          <input type="date" class="form-control" id="billDate" required>
+        </div>
+        <div class="col-md-6">
+          <label for="invoiceNumber" class="form-label">Invoice / Bill Number</label>
+          <input type="text" class="form-control" id="invoiceNumber" required>
+        </div>
+      </div>
+
+      <div class="row mb-3">
+        <div class="col-md-4">
+          <label for="customerName" class="form-label">Customer Name</label>
+          <input type="text" class="form-control" id="customerName" required>
+        </div>
+        <div class="col-md-4">
+          <label for="mobile" class="form-label">Mobile Number</label>
+          <input type="tel" class="form-control" id="mobile" required>
+        </div>
+        <div class="col-md-4">
+          <label for="address" class="form-label">Address</label>
+          <input class="form-control" id="address" required>
+        </div>
+      </div>
+
+      <hr>
+
+      <div id="itemsContainer"></div>
+      <button type="button" class="btn btn-outline-warning mb-3" onclick="addItem()">➕ Add Item</button>
+
+      <div class="mb-3">
+        <label class="form-label">Grand Total Amount</label>
+        <input type="text" class="form-control" id="grandTotal" readonly>
+      </div>
+
+      <div class="d-flex gap-3 mt-3">
+        <button type="button" class="btn btn-primary w-100" onclick="calculateAllTotals()">Calculate</button>
+        <button type="button" class="btn btn-success w-100" onclick="printReceipt()">Print</button>
+        <button type="reset" class="btn btn-secondary w-100" onclick="resetForm()">Reset</button>
+      </div>
+    </form>
+
+    <!-- Printable Receipt -->
+    <div id="printable" class="mt-5 receipt-box d-none">
+      <img src="lodge.jpg" alt="Gold Jewellery" class="gold-image">
+      <h2 class="text-center">RR Golden Jewellers</h2>
+      <p><strong>Date:</strong> <span id="p_date"></span></p>
+      <p><strong>Invoice #:</strong> <span id="p_invoice">INV-001</span></p>
+      <p><strong>Customer Name:</strong> <span id="p_customerName"></span></p>
+      <p><strong>Mobile:</strong> <span id="p_mobile"></span></p>
+      <p><strong>Address:</strong> <span id="p_address"></span></p>
+
+      <hr>
+
+      <table class="table table-bordered">
+        <thead>
+          <tr>
+            <th>Description</th>
+            <th>Quality</th>
+            <th>Weight</th>
+            <th>Fine (%)</th>
+            <th>Rate/g</th>
+            <th>Hallmark ₹</th>
+            <th>Total</th>
+          </tr>
+        </thead>
+        <tbody id="printItems"></tbody>
+      </table>
+
+      <p class="text-end mt-4"><strong>Total Amount: ₹<span id="p_total_big"></span></strong></p>
+    </div>
+  </div>
+
+  <!-- Bootstrap & JS -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    let itemCount = 0;
+    let sessionTimeout;
+
+    function addItem() {
+      itemCount++;
+      const container = document.getElementById("itemsContainer");
+      const itemHTML = ` 
+        <div class="row mb-3 item" data-id="${itemCount}">
+          <div class="col-md-2"><input type="text" class="form-control description" placeholder="Description" required></div>
+          <div class="col-md-2">
+            <select class="form-select quality" required>
+              <option value="">Select Quality</option>
+              <option value="18CT">18CT</option>
+              <option value="22CT">22CT</option>
+              <option value="24CT">24CT</option>
+            </select>
+          </div>
+          <div class="col-md-2"><input type="number" step="0.01" class="form-control weight" placeholder="Weight" required></div>
+          <div class="col-md-2"><input type="number" step="0.01" class="form-control fine" placeholder="Fine %" required></div>
+          <div class="col-md-2"><input type="number" step="0.01" class="form-control rate" placeholder="Rate/g" required></div>
+          <div class="col-md-1"><input type="number" step="0.01" class="form-control hallmark" placeholder="₹HM" required></div>
+          <div class="col-md-1"><input type="text" class="form-control total" placeholder="Total" readonly></div>
+        </div>`;
+      container.insertAdjacentHTML('beforeend', itemHTML);
+    }
+
+    function calculateAllTotals() {
+      const items = document.querySelectorAll(".item");
+      let grandTotal = 0;
+
+      const date = document.getElementById("billDate").value;
+      const invoice = document.getElementById("invoiceNumber").value;
+
+      document.getElementById("p_date").textContent = date || new Date().toLocaleDateString();
+      document.getElementById("p_invoice").textContent = invoice || "INV-001";
+      document.getElementById("p_customerName").textContent = document.getElementById("customerName").value;
+      document.getElementById("p_mobile").textContent = document.getElementById("mobile").value;
+      document.getElementById("p_address").textContent = document.getElementById("address").value;
+
+      const printItems = document.getElementById("printItems");
+      printItems.innerHTML = "";
+
+      items.forEach(item => {
+        const weight = parseFloat(item.querySelector(".weight").value) || 0;
+        const fine = parseFloat(item.querySelector(".fine").value) || 0;
+        const rate = parseFloat(item.querySelector(".rate").value) || 0;
+        const hallmark = parseFloat(item.querySelector(".hallmark").value) || 0;
+        const fineWeight = weight * (fine / 100);
+        const total = (fineWeight * rate) + hallmark;
+
+        item.querySelector(".total").value = total.toFixed(2);
+        grandTotal += total;
+
+        const row = `
+          <tr>
+            <td>${item.querySelector(".description").value}</td>
+            <td>${item.querySelector(".quality").value}</td>
+            <td>${item.querySelector(".weight").value}</td>
+            <td>${item.querySelector(".fine").value}</td>
+            <td>${item.querySelector(".rate").value}</td>
+            <td>${item.querySelector(".hallmark").value}</td>
+            <td>${total.toFixed(2)}</td>
+          </tr>`;
+        printItems.insertAdjacentHTML('beforeend', row);
+      });
+
+      document.getElementById("grandTotal").value = grandTotal.toFixed(2);
+      document.getElementById("p_total_big").textContent = grandTotal.toFixed(2);
+      document.getElementById("printable").classList.remove("d-none");
+    }
+
+    function printReceipt() {
+      if (document.getElementById("grandTotal").value === "") {
+        alert("Please calculate the total first.");
+        return;
+      }
+      window.print();
+    }
+
+    function resetForm() {
+      document.getElementById("itemsContainer").innerHTML = "";
+      document.getElementById("printable").classList.add("d-none");
+      itemCount = 0;
+    }
+
+    function startSessionTimeout() {
+      sessionTimeout = setTimeout(function () {
+        window.location.href = 'index.html';
+      }, 300000);
+    }
+
+    function resetSessionTimer() {
+      clearTimeout(sessionTimeout);
+      startSessionTimeout();
+    }
+
+    window.onload = function () {
+      addItem();
+      startSessionTimeout();
+    };
+
+    document.body.addEventListener('mousemove', resetSessionTimer);
+    document.body.addEventListener('keydown', resetSessionTimer);
+    document.body.addEventListener('click', resetSessionTimer);
+  </script>
+</body>
+</html>
