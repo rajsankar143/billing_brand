@@ -137,7 +137,7 @@ class AuthenticationServerTests(unittest.TestCase):
             self.assertIn(b"Sign in", login_page)
             self.assertIn(b"location.replace('/wordCustomer.html')", login_page)
             self.assertIn(b"const secureLogin", login_page)
-            self.assertIn(b"session cookie was not retained", login_page)
+            self.assertIn(b"did not retain the secure session", login_page)
 
         setup_payload = {
             "setupCode": "test-setup-code",
@@ -173,7 +173,7 @@ class AuthenticationServerTests(unittest.TestCase):
             receipt_page = response.read()
             self.assertEqual(response.status, 200)
             self.assertIn(b'id="invoiceBody"', receipt_page)
-            self.assertIn(b"inactivityTimer", receipt_page)
+            self.assertIn(b"trackActivity", receipt_page)
 
         with self.opener.open(self.base_url + "/wordCustomer.html") as response:
             self.assertEqual(response.status, 200)

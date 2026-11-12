@@ -108,6 +108,9 @@ LOGIN_PAGE = r"""<!doctype html>
     let needsSetup = false;
     const isLocalhost = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
     const secureLogin = location.protocol === 'https:' || isLocalhost;
+        if (!secureLogin) {
+            location.replace(`https://${location.host}${location.pathname}${location.search}${location.hash}`);
+        }
 
     async function initialize() {
       const [setupResponse, sessionResponse] = await Promise.all([
@@ -156,7 +159,9 @@ LOGIN_PAGE = r"""<!doctype html>
       }
     });
 
-    initialize().catch(() => { message.textContent = 'Cannot reach the authentication server.'; });
+        if (secureLogin) {
+            initialize().catch(() => { message.textContent = 'Cannot reach the authentication server.'; });
+        }
   </script>
 </body>
 </html>"""
@@ -594,6 +599,10 @@ class AuthRequestHandler(BaseHTTPRequestHandler):
             body_opening = re.search(rb"<body\b[^>]*>", content, re.IGNORECASE)
             if body_opening:
                 insert_at = body_opening.end()
+                content = content[:insert_at] + toolbar + content[insert_at:]
+            else:
+                body_closing = re.search(rb"</body\s*>", content, re.IGNORECASE)
+                insert_at = body_closing.start() if body_closing else len(content)
                 content = content[:insert_at] + toolbar + content[insert_at:]
         if content_type.startswith("text/") or content_type in {"application/javascript", "image/svg+xml"}:
             content_type += "; charset=utf-8"

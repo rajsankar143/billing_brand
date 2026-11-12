@@ -32,19 +32,42 @@ The EC2-generated `*.compute.amazonaws.com` hostname is not eligible for a publi
 
 The repository includes an Amazon Linux systemd unit at `deploy/aws/sahu-jewellery.service` and an Nginx reverse-proxy template at `deploy/aws/sahu-jewellery.conf`. Replace `/opt/billing_brand` if your app is installed elsewhere, and replace `billing.example.com` with your domain.
 
+From Windows PowerShell, upload the app files and deployment templates to a temporary directory on the instance. Replace the key path and Elastic IP. This deliberately does not upload `auth_config.json`:
+
+```powershell
+$Key = "C:\path\to\your-key.pem"
+$HostName = "ec2-user@YOUR_ELASTIC_IP"
+ssh -i $Key $HostName "mkdir -p /tmp/sahu-jewellery"
+$Files = @(
+	".\auth_server.py",
+	".\index.html",
+	".\dashbord.html",
+	".\silver.html",
+	".\updatedReceipt.html",
+	".\wordCustomer.html",
+	".\logo.png",
+	".\deploy\aws\sahu-jewellery.service",
+	".\\deploy\\aws\\sahu-jewellery.conf",
+	".\\deploy\\aws\\sahu-jewellery-cloudfront.conf"
+)
+scp -i $Key @Files "${HostName}:/tmp/sahu-jewellery/"
+```
+
 On the EC2 instance:
 
-1. Allow inbound TCP ports `80` and `443` in the instance security group. Do not expose port `8000`.
+1. Allow inbound TCP ports `80` and `443` in the instance security group. Restrict SSH (`22`) to your IP. Do not expose port `8000`.
 2. Install the web/runtime packages:
 
 	```bash
 	sudo dnf install -y python3 nginx certbot python3-certbot-nginx
 	```
 
-3. Create a dedicated service account and persistent SQLite directory, then give the service account read access to the app files:
+3. Install the uploaded app files and create a dedicated service account and persistent SQLite directory:
 
 	```bash
 	sudo useradd --system --no-create-home --shell /sbin/nologin billing
+	sudo install -d -o root -g billing -m 750 /opt/billing_brand
+	sudo cp /tmp/sahu-jewellery/*.html /tmp/sahu-jewellery/auth_server.py /tmp/sahu-jewellery/logo.png /opt/billing_brand/
 	sudo chown -R root:billing /opt/billing_brand
 	sudo chmod -R g+rX,o-rwx /opt/billing_brand
 	sudo install -d -o billing -g billing -m 750 /var/lib/sahu-jewellery
@@ -72,14 +95,20 @@ On the EC2 instance:
 5. Install and start the service and Nginx configuration:
 
 	```bash
-	sudo cp deploy/aws/sahu-jewellery.service /etc/systemd/system/
-	sudo cp deploy/aws/sahu-jewellery.conf /etc/nginx/conf.d/sahu-jewellery.conf
+	sudo cp /tmp/sahu-jewellery/sahu-jewellery.service /etc/systemd/system/
+	sudo cp /tmp/sahu-jewellery/sahu-jewellery.conf /etc/nginx/conf.d/sahu-jewellery.conf
+	sudo nano /etc/nginx/conf.d/sahu-jewellery.conf
+	```
+
+	Replace `billing.example.com` with your domain, then run:
+
+	```bash
 	sudo systemctl daemon-reload
 	sudo systemctl enable --now sahu-jewellery nginx
 	sudo nginx -t && sudo systemctl reload nginx
 	```
 
-6. After DNS resolves to the instance, obtain the certificate and configure HTTPS:
+6. Confirm your domain's DNS A record resolves to the Elastic IP, then obtain the certificate and configure HTTPS. Certbot updates Nginx to listen on `443` and redirect HTTP to HTTPS:
 
 	```bash
 	sudo certbot --nginx --redirect -d billing.example.com
@@ -99,3 +128,63 @@ For deployment checks, use a GET request (not `curl -I`, because `/login` is gen
 ```bash
 curl -sS -o /dev/null -w 'Login page: HTTP %{http_code}\n' https://billing.example.com/login
 ```
+
+### HTTPS troubleshooting
+
+If the HTTP login page loads but HTTPS reports `ERR_CONNECTION_REFUSED`, the TLS endpoint is not listening or inbound TCP `443` is blocked. Do not enter credentials over HTTP. The EC2 `*.compute.amazonaws.com` hostname is not eligible for a publicly trusted certificate; use a domain you control.
+
+On the instance, check Nginx and the certificate:
+
+```bash
+sudo systemctl status nginx sahu-jewellery --no-pager
+sudo nginx -t
+sudo certbot certificates
+sudo ss -lntp | grep -E ':(80|443)([[:space:]]|$)'
+```
+
+If there is no valid certificate for your domain, first verify its DNS A record points to the Elastic IP and that security group TCP `80` and `443` rules are active. Then run:
+
+```bash
+sudo certbot --nginx --redirect -d billing.example.com
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+Finally, test `https://billing.example.com/login`. The expected response is HTTP `200`.
+
+### AWS browser access without a custom domain
+
+To use a browser over trusted HTTPS without registering a domain, put CloudFront in front of this EC2 app. CloudFront provides an HTTPS `*.cloudfront.net` hostname. Keep the existing app authentication and `AUTH_COOKIE_SECURE=1`; do not turn off secure cookies or expose port `8000`.
+
+1. In the EC2 security group, allow inbound TCP `80` for the CloudFront origin and restrict SSH (`22`) to your IP. The app itself must continue listening only on `127.0.0.1:8000`.
+2. Connect to EC2 and generate an origin-only secret. Keep it private; you will enter the same value in CloudFront and Nginx:
+
+	```bash
+	openssl rand -hex 32
+	```
+
+3. In AWS Console, open **CloudFront** and create a distribution:
+   - Origin domain: the EC2 public DNS hostname, without `http://` or a path.
+   - Origin protocol: **HTTP only**, port `80`.
+   - Add an origin custom header named `X-Origin-Verify` with the secret generated above.
+   - Viewer protocol policy: **Redirect HTTP to HTTPS**.
+   - Allowed methods: all methods (`GET`, `HEAD`, `OPTIONS`, `PUT`, `POST`, `PATCH`, `DELETE`).
+   - Cache policy: **CachingDisabled**.
+   - Origin request policy: **AllViewer**, so the browser `Host`, `Origin`, cookies, and request body reach the app correctly.
+   - Leave the alternate domain name and custom certificate fields empty. Wait until the distribution status is **Deployed**, then copy its domain name, for example `d123example.cloudfront.net`.
+
+4. If you did not upload it in the earlier PowerShell `scp` step, add `deploy/aws/sahu-jewellery-cloudfront.conf` to `$Files` and upload again. On EC2, install and edit it:
+
+	```bash
+	sudo install -m 644 /tmp/sahu-jewellery/sahu-jewellery-cloudfront.conf /etc/nginx/conf.d/sahu-jewellery-cloudfront.conf
+	sudo nano /etc/nginx/conf.d/sahu-jewellery-cloudfront.conf
+	```
+
+	Replace `YOUR_DISTRIBUTION.cloudfront.net` with the distribution hostname and `REPLACE_WITH_ORIGIN_SECRET` with the exact secret entered in CloudFront. Save, then verify and reload Nginx:
+
+	```bash
+	sudo nginx -t && sudo systemctl reload nginx
+	```
+
+5. Open `https://YOUR_DISTRIBUTION.cloudfront.net/login`. Use the admin credentials already configured on EC2. HTTP should redirect to HTTPS, and direct origin requests without the private header should receive `403`.
+
+Keep CloudFront caching disabled for every app path. Do not enable caching for HTML, API responses, or cookies, because those responses contain user-specific billing and session data. CloudFront usage may incur AWS charges.
